@@ -24,4 +24,4 @@ VOLUME /mnt
 
 WORKDIR /mnt
 
-ENTRYPOINT ["/usr/local/bin/xmr-stak -c /usr/local/bin/config.txt -C /usr/local/bin/pools.txt --cpu /usr/local/bin/cpu.txt"]
+CMD ["/usr/local/bin/xmr-stak", "-c", "/usr/local/bin/config.txt", "-C", "/usr/local/bin/pools.txt", "--cpu", "/usr/local/bin/cpu.txt"]
