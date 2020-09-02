@@ -13,6 +13,13 @@ endif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 
 # help to find cuda on systems with a software module system
 list(APPEND CMAKE_PREFIX_PATH "$ENV{CUDA_ROOT}")
+
+# help to find AMD OCL SDK Light (replaced APP SDK)
+list(APPEND CMAKE_PREFIX_PATH "$ENV{OCL_ROOT}")
+
+# help to find AMD app SDK on systems with a software module system
+list(APPEND CMAKE_PREFIX_PATH "$ENV{AMDAPPSDKROOT}")
+
 # allow user to extent CMAKE_PREFIX_PATH via environment variable
 list(APPEND CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH}")
 
@@ -37,13 +44,13 @@ endif()
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "${BUILD_TYPE}")
 
 set(XMR-STAK_COMPILE "native" CACHE STRING "select CPU compute architecture")
-set_property(CACHE XMR-STAK_COMPILE PROPERTY STRINGS "native;generic")
+set_property(CACHE XMR-STAK_COMPILE PROPERTY STRINGS "native;generic;dev_release")
 if(XMR-STAK_COMPILE STREQUAL "native")
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         set(CMAKE_CXX_FLAGS "-march=native -mtune=native ${CMAKE_CXX_FLAGS}")
         set(CMAKE_C_FLAGS "-march=native -mtune=native ${CMAKE_C_FLAGS}")
     endif()
-elseif(XMR-STAK_COMPILE STREQUAL "generic")
+elseif(XMR-STAK_COMPILE STREQUAL "generic" OR XMR-STAK_COMPILE STREQUAL "dev_release")
     add_definitions("-DCONF_ENFORCE_OpenCL_1_2=1")
 else()
     message(FATAL_ERROR "XMR-STAK_COMPILE is set to an unknown value '${XMR-STAK_COMPILE}'")
@@ -63,6 +70,44 @@ if(CUDA_ENABLE)
     find_package(CUDA 7.5)
 
     if(CUDA_FOUND)
+        # required for monero's cryptonight_r
+        # libcuda
+        find_library(CUDA_LIB 
+        NAMES
+            libcuda 
+            cuda 
+            cuda.lib
+        HINTS
+            ${CUDA_TOOLKIT_ROOT_DIR}
+            ${LIBCUDA_LIBRARY_DIR}
+            ${CUDA_TOOLKIT_ROOT_DIR}
+            /usr
+            /usr/local/cuda
+        PATH_SUFFIXES
+            lib64
+            lib/x64
+            lib/Win32
+            lib64/stubs
+            lib)
+
+        #nvrtc
+        find_library(CUDA_NVRTC_LIB 
+        NAMES
+            libnvrtc 
+            nvrtc 
+            nvrtc.lib
+        HINTS 
+            ${CUDA_TOOLKIT_ROOT_DIR} 
+            ${LIBNVRTC_LIBRARY_DIR}
+            ${CUDA_TOOLKIT_ROOT_DIR}
+            /usr 
+            /usr/local/cuda
+        PATH_SUFFIXES
+            lib64
+            lib/x64
+            lib/Win32
+            lib)
+
         list(APPEND BACKEND_TYPES "nvidia")
         option(XMR-STAK_LARGEGRID "Support large CUDA block count > 128" ON)
         if(XMR-STAK_LARGEGRID)
@@ -152,6 +197,9 @@ if(CUDA_ENABLE)
                 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++11")
             endif()
 
+            # required for cryptonight_gpu (fast floating point operations are not allowed)
+            set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} --fmad=false --prec-div=true --ftz=false")
+
             # avoid that nvcc in CUDA 8 complains about sm_20 pending removal
             if(CUDA_VERSION VERSION_EQUAL 8.0)
                 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets")
@@ -190,16 +238,11 @@ if(CUDA_ENABLE)
                 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}" "-D_MWAITXINTRIN_H_INCLUDED")
             endif()
 
-            if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC" AND
-                (CUDA_VERSION VERSION_EQUAL 9.0 OR
-                CUDA_VERSION VERSION_EQUAL 9.1 OR
-                CUDA_VERSION VERSION_EQUAL 9.2 OR
-                CUDA_VERSION VERSION_EQUAL 10.0)
-            )
-                # workaround find_package(CUDA) is using the wrong path to the CXX host compiler
-                # overwrite the CUDA host compiler variable with the used CXX MSVC
-                set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
-            endif()
+            # workaround find_package(CUDA) is using the wrong path to the CXX host compiler
+            # overwrite the CUDA host compiler variable with the used CXX MSVC
+            # in linux where clang and gcc is installed it also helps to select the correct host compiler
+            set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
+
         else()
             message(FATAL_ERROR "selected CUDA compiler '${CUDA_COMPILER}' is not supported")
         endif()
@@ -209,11 +252,6 @@ if(CUDA_ENABLE)
 else()
     add_definitions("-DCONF_NO_CUDA")
 endif()
-
-# help to find AMD app SDK on systems with a software module system
-list(APPEND CMAKE_PREFIX_PATH "$ENV{AMDAPPSDKROOT}")
-# allow user to extent CMAKE_PREFIX_PATH via environment variable
-list(APPEND CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH}")
 
 ###############################################################################
 # Find OpenCL
@@ -228,6 +266,7 @@ if(OpenCL_ENABLE)
             OpenCL/cl.h
         NO_DEFAULT_PATH
         PATHS
+            ENV "OCL_ROOT"
             ENV "OpenCL_ROOT"
             ENV AMDAPPSDKROOT
             ENV ATISTREAMSDKROOT
@@ -244,6 +283,7 @@ if(OpenCL_ENABLE)
             OpenCL.lib
         NO_DEFAULT_PATH
         PATHS
+            ENV "OCL_ROOT"
             ENV "OpenCL_ROOT"
             ENV AMDAPPSDKROOT
             ENV ATISTREAMSDKROOT
@@ -277,6 +317,14 @@ if(NOT CPU_ENABLE)
     add_definitions("-DCONF_NO_CPU")
 else()
     list(APPEND BACKEND_TYPES "cpu")
+endif()
+
+################################################################################
+# Explicit march setting for Clang
+################################################################################
+
+if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    set_source_files_properties(xmrstak/backend/cpu/crypto/cn_gpu_avx.cpp PROPERTIES COMPILE_FLAGS "-mavx2")
 endif()
 
 ################################################################################
@@ -448,6 +496,10 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
     set(CMAKE_C_FLAGS "-Wl,-z,noexecstack ${CMAKE_C_FLAGS}")
 endif()
 
+if(XMR-STAK_COMPILE STREQUAL "dev_release")
+    add_definitions(-DXMRSTAK_DEV_RELEASE)
+endif()
+
 # activate static libgcc and libstdc++ linking
 if(CMAKE_LINK_STATIC)
     set(BUILD_SHARED_LIBRARIES OFF)
@@ -462,18 +514,23 @@ if(CMAKE_C_COMPILER_ID MATCHES "MSVC")
     # asm optimized monero v8 code
     enable_language(ASM_MASM)
     set_property(SOURCE "xmrstak/backend/cpu/crypto/asm/cryptonight_v8_main_loop.asm" PROPERTY ASM_MASM)
+    set_property(SOURCE "xmrstak/backend/cpu/crypto/asm/cnR/CryptonightR_template.asm" PROPERTY ASM_MASM)
     add_library(xmr-stak-asm
         STATIC
         "xmrstak/backend/cpu/crypto/asm/cryptonight_v8_main_loop.asm"
+        "xmrstak/backend/cpu/crypto/asm/cnR/CryptonightR_template.asm"
     )
 else()
     # asm optimized monero v8 code
     enable_language(ASM)
     set_property(SOURCE "xmrstak/backend/cpu/crypto/asm/cryptonight_v8_main_loop.S" PROPERTY CPP)
+    set_property(SOURCE "xmrstak/backend/cpu/crypto/asm/cnR/CryptonightR_template.S" PROPERTY CPP)
     set_source_files_properties("xmrstak/backend/cpu/crypto/asm/cryptonight_v8_main_loop.S" PROPERTIES COMPILE_FLAGS "-x assembler-with-cpp")
+    set_source_files_properties("xmrstak/backend/cpu/crypto/asm/cnR/CryptonightR_template.S" PROPERTIES COMPILE_FLAGS "-x assembler-with-cpp")
     add_library(xmr-stak-asm
         STATIC
         "xmrstak/backend/cpu/crypto/asm/cryptonight_v8_main_loop.S"
+        "xmrstak/backend/cpu/crypto/asm/cnR/CryptonightR_template.S"
     )
 endif()
 
@@ -532,6 +589,17 @@ if(CUDA_FOUND)
             ${CUDASRCFILES}
         )
     endif()
+
+    set(CUDA_LIBRARIES ${CUDA_LIB} ${CUDA_LIBRARIES})
+    if(XMR-STAK_COMPILE STREQUAL "dev_release")
+        # do not link nvrtc for linux binaries, cn-r will be disabled
+        if(WIN32)
+            set(CUDA_LIBRARIES ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB})
+        endif()
+    else()
+        set(CUDA_LIBRARIES ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB})
+    endif()
+    
     target_link_libraries(xmrstak_cuda_backend ${CUDA_LIBRARIES})
     target_link_libraries(xmrstak_cuda_backend xmr-stak-backend xmr-stak-asm)
 endif()

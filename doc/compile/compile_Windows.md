@@ -30,15 +30,13 @@
     - CUDA/Runtime
     - Driver components
 
-### AMD DRIVER/APP SDK 3.0 (only needed for AMD GPUs)
+### AMD DRIVER/OCL-SDK (only needed for AMD GPUs)
 
 - Download & install the AMD driver: https://www.amd.com/en/support
 
-**ATTENTION** Many windows driver 18.5+ creating invalid shares.
-If you have an issue with `invalid shares` please downgrade your driver.
+- Download and install the latest version of the OCL-SDK from https://github.com/GPUOpen-LibrariesAndSDKs/OCL-SDK/releases 
 
-- Download and install the latest version from http://amd-dev.wpengine.netdna-cdn.com/app-sdk/installers/APPSDKInstaller/3.0.130.135-GA/full/AMD-APP-SDKInstaller-v3.0.130.135-GA-windows-F-x64.exe
-  (do not wonder why it is a link to a netdna-cdn.com but AMD has removed the SDK downloads, see https://community.amd.com/thread/222855)
+Do not follow old information that you need the AMD APP SDK. AMD has removed the APP SDK and is now shipping the OCL-SDK_light.
 
 ### Dependencies OpenSSL/Hwloc and Microhttpd
 - For CUDA 8*:
@@ -115,4 +113,13 @@ If you have an issue with `invalid shares` please downgrade your driver.
 
   copy C:\xmr-stak-dep\openssl\bin\* .
   ```
-- Miner is by default compiled for NVIDIA GPUs (if CUDA is installed), AMD GPUs (if the AMD APP SDK is installed) and CPUs.
+- For Exclude some of dependence you can follow the command below to set the ENABLE to OFF
+  ```
+  make -G "Visual Studio 15 2017 Win64" -T v141,host=x64 -DCMAKE_BUILD_TYPE=Release -DMICROHTTPD_ENABLE=OFF -DCUDA_ENABLE=OFF -DOpenCL_ENABLE=OFF ..
+  cmake --build . --config Release --target clean
+  cmake --build . --config Release --target install
+  cd bin\Release
+
+  copy C:\xmr-stak-dep\openssl\bin\* .
+  ```
+- Miner is by default compiled for NVIDIA GPUs (if CUDA is installed), AMD GPUs (if the AMD OCL-SDK_light is installed) and CPUs.

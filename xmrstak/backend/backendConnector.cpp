@@ -21,31 +21,30 @@
   *
   */
 
-#include "iBackend.hpp"
 #include "backendConnector.hpp"
-#include "miner_work.hpp"
 #include "globalStates.hpp"
+#include "iBackend.hpp"
+#include "miner_work.hpp"
 #include "plugin.hpp"
-#include "xmrstak/misc/environment.hpp"
 #include "xmrstak/misc/console.hpp"
+#include "xmrstak/misc/environment.hpp"
 #include "xmrstak/params.hpp"
 
 #include "cpu/minethd.hpp"
 #ifndef CONF_NO_CUDA
-#	include "nvidia/minethd.hpp"
+#include "nvidia/minethd.hpp"
 #endif
 #ifndef CONF_NO_OPENCL
-#	include "amd/minethd.hpp"
+#include "amd/minethd.hpp"
 #endif
 
-#include <cstdlib>
 #include <assert.h>
-#include <cmath>
+#include <bitset>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
-#include <bitset>
-
 
 namespace xmrstak
 {
@@ -59,42 +58,6 @@ std::vector<iBackend*>* BackendConnector::thread_starter(miner_work& pWork)
 {
 
 	std::vector<iBackend*>* pvThreads = new std::vector<iBackend*>;
-
-#ifndef CONF_NO_CUDA
-	if(params::inst().useNVIDIA)
-	{
-		plugin nvidiaplugin;
-		std::vector<iBackend*>* nvidiaThreads;
-		std::vector<std::string> libNames = {"xmrstak_cuda_backend_cuda10_0", "xmrstak_cuda_backend_cuda9_2", "xmrstak_cuda_backend"};
-		size_t numWorkers = 0u;
-
-		for( const auto & name : libNames)
-		{
-			printer::inst()->print_msg(L0, "NVIDIA: try to load library '%s'", name.c_str());
-			nvidiaplugin.load("NVIDIA", name);
-			std::vector<iBackend*>* nvidiaThreads = nvidiaplugin.startBackend(static_cast<uint32_t>(pvThreads->size()), pWork, environment::inst());
-			if(nvidiaThreads != nullptr)
-			{
-				pvThreads->insert(std::end(*pvThreads), std::begin(*nvidiaThreads), std::end(*nvidiaThreads));
-				numWorkers = nvidiaThreads->size();
-				delete nvidiaThreads;
-			}
-			else
-			{
-				// remove the plugin if we have found no GPUs
-				nvidiaplugin.unload();
-			}
-			// we found at leat one working GPU
-			if(numWorkers != 0)
-			{
-				printer::inst()->print_msg(L0, "NVIDIA: use library '%s'", name.c_str());
-				break;
-			}
-		}
-		if(numWorkers == 0)
-			printer::inst()->print_msg(L0, "WARNING: backend NVIDIA disabled.");
-	}
-#endif
 
 #ifndef CONF_NO_OPENCL
 	if(params::inst().useAMD)
@@ -112,6 +75,62 @@ std::vector<iBackend*>* BackendConnector::thread_starter(miner_work& pWork)
 		}
 		if(numWorkers == 0)
 			printer::inst()->print_msg(L0, "WARNING: backend %s (OpenCL) disabled.", backendName.c_str());
+	}
+#endif
+
+#ifndef CONF_NO_CUDA
+	if(params::inst().useNVIDIA)
+	{
+		bool disableNvidia = false;
+
+		plugin nvidiaplugin;
+#ifdef XMRSTAK_DEV_RELEASE
+		std::vector<std::string> libNames = {"xmrstak_cuda_backend_cuda10_0", "xmrstak_cuda_backend"};
+#	ifndef _WIN32
+		auto neededAlgorithms = ::jconf::inst()->GetCurrentCoinSelection().GetAllAlgorithms();
+		bool cn_r_derivate =
+			std::find(neededAlgorithms.begin(), neededAlgorithms.end(), cryptonight_r) != neededAlgorithms.end() ||
+			std::find(neededAlgorithms.begin(), neededAlgorithms.end(), cryptonight_r_wow) != neededAlgorithms.end();
+
+		if(cn_r_derivate)
+		{
+			disableNvidia = true;
+			printer::inst()->print_msg(L0, "WARNING: The linux release binaries not support cryptonight_r derived coins for NVIDIA.");		
+		}
+#	endif
+#else
+		std::vector<std::string> libNames = {"xmrstak_cuda_backend"};
+#endif
+		size_t numWorkers = 0u;
+
+		if(!disableNvidia)
+		{
+			for(const auto& name : libNames)
+			{
+				printer::inst()->print_msg(L0, "NVIDIA: try to load library '%s'", name.c_str());
+				nvidiaplugin.load("NVIDIA", name);
+				std::vector<iBackend*>* nvidiaThreads = nvidiaplugin.startBackend(static_cast<uint32_t>(pvThreads->size()), pWork, environment::inst());
+				if(nvidiaThreads != nullptr)
+				{
+					pvThreads->insert(std::end(*pvThreads), std::begin(*nvidiaThreads), std::end(*nvidiaThreads));
+					numWorkers = nvidiaThreads->size();
+					delete nvidiaThreads;
+				}
+				else
+				{
+					// remove the plugin if we have found no GPUs
+					nvidiaplugin.unload();
+				}
+				// we found at leat one working GPU
+				if(numWorkers != 0)
+				{
+					printer::inst()->print_msg(L0, "NVIDIA: use library '%s'", name.c_str());
+					break;
+				}
+			}
+		}
+		if(numWorkers == 0)
+			printer::inst()->print_msg(L0, "WARNING: backend NVIDIA disabled.");
 	}
 #endif
 
